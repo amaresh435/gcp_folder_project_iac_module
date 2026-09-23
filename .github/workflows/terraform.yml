@@ -1,0 +1,162 @@
+name: Terraform GCP Folder/Project Pipeline
+
+# ---------------------------------------------------------------------------
+# Manually triggered pipeline: checkout -> download GCP creds -> plan ->
+# (manual approve/reject gate) -> apply
+#
+# SETUP REQUIRED BEFORE FIRST RUN:
+#
+# 1) Repo secrets (Settings -> Secrets and variables -> Actions):
+#      GCP_SA_KEY_B64      base64-encoded GCP service account JSON key
+#                          (e.g. `base64 -w0 sa-key.json` locally, then paste)
+#      GCP_ORG_ID          your GCP organization ID
+#      GCP_BILLING_ACCOUNT your billing account ID
+#      TF_STATE_BUCKET     GCS bucket name used for remote state
+#
+# 2) GitHub Environments (Settings -> Environments), one per env you plan to
+#    apply to: "dv-apply", "qa-apply", "ut-apply", "pr-apply", "dr-apply".
+#    On each, enable "Required reviewers" and add the people who should be
+#    able to approve/reject an apply. This is what gives you the manual
+#    approve/reject gate below — GitHub pauses the apply job until a
+#    listed reviewer approves or rejects it from the Actions run page.
+#
+# 3) dv must be applied at least once before qa/ut/pr/dr, since those
+#    envs read the shared "proj1" parent folder id from dv's remote state.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to target"
+        required: true
+        type: choice
+        options: [dv, qa, ut, pr, dr]
+        default: dv
+      action:
+        description: "Terraform action"
+        required: true
+        type: choice
+        options: [plan-only, plan-and-apply, destroy]
+        default: plan-only
+
+env:
+  TF_VERSION: "1.9.5"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # PLAN: always runs. No approval needed to see what would change.
+  # -------------------------------------------------------------------------
+  plan:
+    name: "Terraform Plan (${{ inputs.environment }})"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download & decode GCP service account key
+        run: |
+          echo "${{ secrets.GCP_SA_KEY_B64 }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/gcp-sa-key.json" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=gcp_folder_project_iac_module/${{ inputs.environment }}"
+
+      - name: Terraform Format Check
+        working-directory: ${{ inputs.environment }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: ${{ inputs.environment }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ inputs.environment }}
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform plan -destroy \
+              -var="org_id=${{ secrets.GCP_ORG_ID }}" \
+              -var="billing_account=${{ secrets.GCP_BILLING_ACCOUNT }}" \
+              -var="dv_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+              -out=tfplan.binary
+          else
+            terraform plan \
+              -var="org_id=${{ secrets.GCP_ORG_ID }}" \
+              -var="billing_account=${{ secrets.GCP_BILLING_ACCOUNT }}" \
+              -var="dv_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+              -out=tfplan.binary
+          fi
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.environment }}/tfplan.binary
+          retention-days: 5
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/gcp-sa-key.json"
+
+  # -------------------------------------------------------------------------
+  # APPLY: only runs for plan-and-apply / destroy. Gated by a GitHub
+  # Environment with required reviewers -> this IS the manual approve/reject
+  # step. The job sits in "Waiting" state until a reviewer acts on it from
+  # the Actions run page.
+  # -------------------------------------------------------------------------
+  apply:
+    name: "Terraform Apply (${{ inputs.environment }}) — manual approval required"
+    needs: plan
+    if: ${{ inputs.action == 'plan-and-apply' || inputs.action == 'destroy' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}-apply
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download & decode GCP service account key
+        run: |
+          echo "${{ secrets.GCP_SA_KEY_B64 }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/gcp-sa-key.json" >> "$GITHUB_ENV"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ inputs.environment }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=gcp_folder_project_iac_module/${{ inputs.environment }}"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.environment }}
+
+      - name: Terraform Apply (approved plan)
+        working-directory: ${{ inputs.environment }}
+        run: terraform apply -auto-approve tfplan.binary
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/gcp-sa-key.json"

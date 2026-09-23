@@ -1,0 +1,100 @@
+# ---------------------------------------------------------------------------
+# Google Cloud Build pipeline for gcp_folder_project_iac_module
+#
+# Usage:
+#   gcloud builds submit --config=Pipelines/pipeline.yaml \
+#     --substitutions=_ENV=dv,_ACTION=plan
+#
+# _ENV    : one of dv | qa | ut | pr | dr   (dv MUST be applied first, since
+#           it creates the shared "v3feed" parent folder that qa/ut/pr/dr read
+#           via terraform_remote_state)
+# _ACTION : plan | apply | destroy
+# ---------------------------------------------------------------------------
+steps:
+  # ---------------------------------------------------------------------
+  # terraform init
+  # ---------------------------------------------------------------------
+  - id: "tf-init"
+    name: "hashicorp/terraform:1.7"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        cd ${_ENV} && terraform init \
+          -backend-config="bucket=${_TF_STATE_BUCKET}" \
+          -backend-config="prefix=gcp_folder_project_iac_module/${_ENV}"
+
+  # ---------------------------------------------------------------------
+  # terraform validate + fmt check
+  # ---------------------------------------------------------------------
+  - id: "tf-validate"
+    name: "hashicorp/terraform:1.7"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        cd ${_ENV} && terraform fmt -check -recursive && terraform validate
+    waitFor: ["tf-init"]
+
+  # ---------------------------------------------------------------------
+  # terraform plan (always runs, produces a saved plan file as an artifact)
+  # ---------------------------------------------------------------------
+  - id: "tf-plan"
+    name: "hashicorp/terraform:1.7"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        cd ${_ENV} && terraform plan \
+          -var="org_id=${_ORG_ID}" \
+          -var="billing_account=${_BILLING_ACCOUNT}" \
+          -var="dv_state_bucket=${_TF_STATE_BUCKET}" \
+          -out=tfplan.binary
+    waitFor: ["tf-validate"]
+
+  # ---------------------------------------------------------------------
+  # terraform apply (only runs when _ACTION=apply)
+  # ---------------------------------------------------------------------
+  - id: "tf-apply"
+    name: "hashicorp/terraform:1.7"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        if [ "${_ACTION}" = "apply" ]; then
+          cd ${_ENV} && terraform apply -auto-approve tfplan.binary
+        else
+          echo "Skipping apply (_ACTION=${_ACTION})"
+        fi
+    waitFor: ["tf-plan"]
+
+  # ---------------------------------------------------------------------
+  # terraform destroy (only runs when _ACTION=destroy) — guarded, manual use
+  # ---------------------------------------------------------------------
+  - id: "tf-destroy"
+    name: "hashicorp/terraform:1.7"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        if [ "${_ACTION}" = "destroy" ]; then
+          cd ${_ENV} && terraform destroy -auto-approve \
+            -var="org_id=${_ORG_ID}" \
+            -var="billing_account=${_BILLING_ACCOUNT}" \
+            -var="dv_state_bucket=${_TF_STATE_BUCKET}"
+        else
+          echo "Skipping destroy (_ACTION=${_ACTION})"
+        fi
+    waitFor: ["tf-plan"]
+
+substitutions:
+  _ENV: "dv"
+  _ACTION: "plan"
+  _ORG_ID: ""
+  _BILLING_ACCOUNT: ""
+  _TF_STATE_BUCKET: ""
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: "1200s"
