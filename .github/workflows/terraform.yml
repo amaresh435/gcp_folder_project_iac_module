@@ -71,7 +71,6 @@ jobs:
         working-directory: ${{ inputs.environment }}
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="prefix=gcp_folder_project_iac_module/${{ inputs.environment }}"
 
       - name: Terraform Format Check
@@ -140,7 +139,6 @@ jobs:
         working-directory: ${{ inputs.environment }}
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="prefix=gcp_folder_project_iac_module/${{ inputs.environment }}"
 
       - name: Download plan artifact
