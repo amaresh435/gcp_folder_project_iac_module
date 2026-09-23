@@ -6,6 +6,7 @@ variable "org_id" {
 variable "billing_account" {
   description = "The billing account id to associate with all projects"
   type        = string
+  default     = ""
 }
 
 variable "region" {
