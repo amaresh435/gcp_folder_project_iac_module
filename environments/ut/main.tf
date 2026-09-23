@@ -25,7 +25,7 @@ module "env_folder" {
 # Projects nested under v3feed-ut: v3feed-ut-data, v3feed-ut-k8s, v3feed-ut-network
 # ---------------------------------------------------------------------------
 module "projects" {
-  source   = "../modules/project"
+  source   = "../../modules/project"
   for_each = var.sub_projects
 
   project_id      = "${var.parent_folder_name}-${var.env}-${each.key}"
