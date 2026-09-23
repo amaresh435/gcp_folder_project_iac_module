@@ -7,7 +7,7 @@ name: Terraform GCP Folder/Project Pipeline
 # SETUP REQUIRED BEFORE FIRST RUN:
 #
 # 1) Repo secrets (Settings -> Secrets and variables -> Actions):
-#      GCP_SA_KEY_B64      base64-encoded GCP service account JSON key
+#      GCP_SA_KEY      base64-encoded GCP service account JSON key
 #                          (e.g. `base64 -w0 sa-key.json` locally, then paste)
 #      GCP_ORG_ID          your GCP organization ID
 #      GCP_BILLING_ACCOUNT your billing account ID
@@ -59,7 +59,7 @@ jobs:
 
       - name: Download & decode GCP service account key
         run: |
-          echo "${{ secrets.GCP_SA_KEY_B64 }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
+          echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/gcp-sa-key.json" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
@@ -88,14 +88,10 @@ jobs:
           if [ "${{ inputs.action }}" = "destroy" ]; then
             terraform plan -destroy \
               -var="org_id=${{ secrets.GCP_ORG_ID }}" \
-              -var="billing_account=${{ secrets.GCP_BILLING_ACCOUNT }}" \
-              -var="dv_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
               -out=tfplan.binary
           else
             terraform plan \
               -var="org_id=${{ secrets.GCP_ORG_ID }}" \
-              -var="billing_account=${{ secrets.GCP_BILLING_ACCOUNT }}" \
-              -var="dv_state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
               -out=tfplan.binary
           fi
 
@@ -132,7 +128,7 @@ jobs:
 
       - name: Download & decode GCP service account key
         run: |
-          echo "${{ secrets.GCP_SA_KEY_B64 }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
+          echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > "${RUNNER_TEMP}/gcp-sa-key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/gcp-sa-key.json" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
