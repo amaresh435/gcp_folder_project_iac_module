@@ -12,17 +12,17 @@ data "terraform_remote_state" "dv" {
 }
 
 # ---------------------------------------------------------------------------
-# Environment child folder: v3feed-dr  (nested under v3feed)
+# Environment child folder: v3feed-pr  (nested under v3feed)
 # ---------------------------------------------------------------------------
 module "env_folder" {
-  source = "../modules/folder"
+  source = "../../modules/folder"
 
   parent_id   = data.terraform_remote_state.dv.outputs.parent_folder_id
   folder_name = "${var.parent_folder_name}-${var.env}"
 }
 
 # ---------------------------------------------------------------------------
-# Projects nested under v3feed-dr: v3feed-dr-data, v3feed-dr-k8s, v3feed-dr-network
+# Projects nested under v3feed-pr: v3feed-pr-data, v3feed-pr-k8s, v3feed-pr-network
 # ---------------------------------------------------------------------------
 module "projects" {
   source   = "../modules/project"

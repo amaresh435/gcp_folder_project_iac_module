@@ -15,7 +15,7 @@ data "terraform_remote_state" "dv" {
 # Environment child folder: v3feed-qa  (nested under v3feed)
 # ---------------------------------------------------------------------------
 module "env_folder" {
-  source = "../modules/folder"
+  source = "../../modules/folder"
 
   parent_id   = data.terraform_remote_state.dv.outputs.parent_folder_id
   folder_name = "${var.parent_folder_name}-${var.env}"
